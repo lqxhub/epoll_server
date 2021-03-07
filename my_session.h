@@ -17,10 +17,19 @@ public:
 
     int write(char *buff, int len) override;
 
+    int reWrite() override;
+
     ~MySession() override;
 
 private:
     int fd;
+    int unsendSize{};
+    char *unsend{};
+
+    //标记发送失败
+    void makrWriteFial(char *buff, int size);
+    //标记发送成功
+    void makrRewriteOk();
 };
 
 

@@ -8,7 +8,7 @@
 #include "epoll_server.h"
 #include "my_session.h"
 #include <sys/epoll.h>
-#include <cstdlib>
+#include <fcntl.h>
 
 using namespace std;
 
@@ -24,7 +24,7 @@ bool EpollServer::run() {
     this->eFd = efd;
 
     epoll_event epev{};
-    epev.events = EPOLLIN | EPOLLET;
+    epev.events = EPOLLIN;
     epev.data.fd = this->socketFd;
     epoll_ctl(eFd, EPOLL_CTL_ADD, this->socketFd, &epev);
     this->events = new epoll_event[this->eventNum];
@@ -38,12 +38,23 @@ bool EpollServer::run() {
             return false;
         }
         for (int i = 0; i < eNum; i++) {
-            if (this->events[i].data.fd == this->socketFd) {//上线
+            if (this->events[i].data.fd == this->socketFd) {//新连接
                 if (this->events[i].events & EPOLLIN) {
                     sockaddr_in cli_addr{};
                     socklen_t length = sizeof(cli_addr);
                     int fd = accept(this->socketFd, (sockaddr *) &cli_addr, &length);
                     if (fd > 0) {
+                        if (!this->block) {//如果是非阻塞模式
+                            int f = fcntl(fd, F_GETFL, 0);
+                            if (f < 0) {
+                                cout << "set no block error, fd:" << fd << endl;
+                                continue;
+                            }
+                            if (fcntl(fd, F_SETFL, f | O_NONBLOCK) < 0) {
+                                cout << "set no block error, fd:" << fd << endl;
+                                continue;
+                            }
+                        }
                         cout << "client on line fd:" << fd << endl;
                         Session *ms = new MySession(fd);
                         this->addSession(ms);
@@ -55,25 +66,36 @@ bool EpollServer::run() {
                     cout << "get session not find, id:" << this->events[i].data.fd << endl;
                     continue;
                 }
-                if (this->events[i].events & EPOLLIN) {
-                    int len = session->read(buff, 1024);
-                    if (len == -1) {
-                        this->delSession(session);
-                        cout << "client out fd:" << this->events[i].data.fd << endl;
-                    } else {
-                        cout << "read session: " << session->sessionId() << "  " << buff << endl;
-                        string sid = "hello: " + to_string(session->sessionId());
 
-                        char *t = new char[sid.length()];
-
-                        for (int i = 0; i < sid.length(); i++) {
-                            t[i] = sid[i];
-                        }
-
-                        session->write(t, sid.length());
-                    }
-                } else if (this->events[i].events & EPOLLERR || this->events[i].events & EPOLLHUP) {
+                if (this->events[i].events & EPOLLERR || this->events[i].events & EPOLLHUP) {//出错或者断开
                     this->delSession(session);
+                } else {
+                    if (this->events[i].events & EPOLLOUT) {//可写
+                        int n = session->reWrite();
+                        if (n > 0) {
+                            epoll_event _epev{};
+                            _epev.events = EPOLLIN;
+                            _epev.data.fd = this->events[i].data.fd;
+                            epoll_ctl(this->eFd, EPOLL_CTL_MOD, session->sessionId(), &_epev);
+                        }
+                    }
+                    if (this->events[i].events & EPOLLIN) {
+                        int len = session->read(buff, 1024);
+                        if (len == -1) {
+                            this->delSession(session);
+                            cout << "client out fd:" << this->events[i].data.fd << endl;
+                        } else {
+                            cout << "read session: " << session->sessionId() << "  " << buff << endl;
+                            string sid = "hello: " + to_string(session->sessionId());
+
+                            char *t = new char[sid.length()];
+
+                            for (int i = 0; i < sid.length(); i++) {
+                                t[i] = sid[i];
+                            }
+                            this->writeToSession(session, t, sid.length());
+                        }
+                    }
                 }
             }
         }
@@ -83,6 +105,9 @@ bool EpollServer::run() {
 void EpollServer::addSession(Session *session) {
     epoll_event epev{};
     epev.events = EPOLLIN;
+    if (!this->block) {//是非阻塞
+        epev.events |= EPOLLET;
+    }
     epev.data.fd = session->sessionId();
     epoll_ctl(this->eFd, EPOLL_CTL_ADD, session->sessionId(), &epev);
     this->sessions[session->sessionId()] = session;
@@ -98,6 +123,16 @@ Session *EpollServer::getSession(int sessionId) {
     return this->sessions[sessionId];
 }
 
+
+void EpollServer::writeToSession(Session *session, char *data, int size) {
+    int n = session->write(data, size);
+    if (n == -1) {//写出错.注册可写事件,等待可写时重写
+        epoll_event _epev{};
+        _epev.events = EPOLLIN | EPOLLOUT;
+        _epev.data.fd = session->sessionId();
+        epoll_ctl(this->eFd, EPOLL_CTL_MOD, session->sessionId(), &_epev);
+    }
+}
 
 bool EpollServer::createSocket() {
     int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);

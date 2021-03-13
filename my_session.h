@@ -24,7 +24,7 @@ public:
 private:
     int fd;
     int unsendSize{};
-    char *unsend{};
+    char *unsend = nullptr;
 
     //标记发送失败
     void makrWriteFial(char *buff, int size);

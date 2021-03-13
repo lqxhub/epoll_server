@@ -9,6 +9,7 @@
 #include "my_session.h"
 #include <sys/epoll.h>
 #include <fcntl.h>
+#include <memory>
 
 using namespace std;
 
@@ -29,7 +30,8 @@ bool EpollServer::run() {
     epoll_ctl(eFd, EPOLL_CTL_ADD, this->socketFd, &epev);
     this->events = new epoll_event[this->eventNum];
 
-    char buff[1024];
+    unique_ptr<char> buff(new char[this->buffLen]);
+
     while (true) {
         int eNum = epoll_wait(eFd, this->events, this->eventNum, this->eTimeout);
 
@@ -80,19 +82,15 @@ bool EpollServer::run() {
                         }
                     }
                     if (this->events[i].events & EPOLLIN) {
-                        int len = session->read(buff, 1024);
+                        int len = session->read(buff.get(), this->buffLen);
                         if (len == -1) {
                             this->delSession(session);
                             cout << "client out fd:" << this->events[i].data.fd << endl;
                         } else {
-                            cout << "read session: " << session->sessionId() << "  " << buff << endl;
+                            cout << "read session: " << session->sessionId() << "  " << buff.get() << endl;
                             string sid = "hello: " + to_string(session->sessionId());
-
                             char *t = new char[sid.length()];
-
-                            for (int i = 0; i < sid.length(); i++) {
-                                t[i] = sid[i];
-                            }
+                            sid.copy(t, sid.length(), 0);
                             this->writeToSession(session, t, sid.length());
                         }
                     }
@@ -114,6 +112,7 @@ void EpollServer::addSession(Session *session) {
 }
 
 void EpollServer::delSession(Session *session) {
+    cout << "session: " << session->sessionId() << "out" << endl;
     epoll_ctl(this->eFd, EPOLL_CTL_DEL, session->sessionId(), nullptr);
     this->sessions.erase(session->sessionId());
     delete session;

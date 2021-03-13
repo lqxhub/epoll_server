@@ -22,6 +22,8 @@ private:
     const int eventNum;
     const int eTimeout;
 
+    const int buffLen;
+
     epoll_event *events{};
 
     int eFd = 0;
@@ -29,10 +31,12 @@ private:
     bool block = true;
 
 public:
-    EpollServer() : EpollServer(8088, 20, -1, true) {}
+    EpollServer() : EpollServer(8088, 20, -1, 1024, true) {}
 
-    EpollServer(int _port, int _eventNum, int _eTimeout, bool _block) : port(_port), eventNum(_eventNum),
-                                                                        eTimeout(_eTimeout) {
+    EpollServer(int _port, int _eventNum, int _eTimeout, int _buffLen, bool _block) : port(_port),
+                                                                                      eventNum(_eventNum),
+                                                                                      eTimeout(_eTimeout),
+                                                                                      buffLen(_buffLen) {
         this->block = _block;
     }
 

@@ -50,6 +50,9 @@ void MySession::makrRewriteOk() {
 }
 
 MySession::~MySession() {
+    if (nullptr != this->unsend) {
+        delete[] this->unsend;
+    }
     close(this->fd);
 }
 
